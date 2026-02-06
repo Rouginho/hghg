@@ -1,0 +1,175 @@
+<!-- index.html -->
+<!doctype html>
+<html lang="el">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Closest Point</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#111111">
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; }
+
+    .panel {
+      position: absolute;
+      z-index: 999;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      max-width: 620px;
+      background: rgba(0,0,0,0.78);
+      color: #fff;
+      padding: 12px;
+      border-radius: 14px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      backdrop-filter: blur(8px);
+    }
+
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      background: #ffffff;
+      color: #111;
+      font-weight: 700;
+    }
+    button.secondary {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.25);
+      color: #fff;
+      font-weight: 600;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .small { opacity: 0.9; font-size: 14px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Search */
+    #searchBox {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      outline: none;
+      box-sizing: border-box;
+    }
+    #searchBox::placeholder { color: rgba(255,255,255,0.7); }
+
+    #suggestions {
+      margin-top: 8px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12);
+      display: none;
+      background: rgba(0,0,0,0.65);
+    }
+    .sugg-item {
+      padding: 10px 12px;
+      cursor: pointer;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .sugg-item:hover { background: rgba(255,255,255,0.08); }
+    .sugg-strong { font-weight: 700; }
+
+    /* =========================
+       Closest glow: έξω ΜΩΒ, μέσα ΚΟΚΚΙΝΟ (αναβοσβήνει)
+       ========================= */
+    .leaflet-marker-icon.closest-glow {
+      filter:
+        /* inner red */
+        drop-shadow(0 0 4px rgba(255, 40, 40, 1))
+        drop-shadow(0 0 10px rgba(255, 40, 40, 0.85))
+        /* outer purple */
+        drop-shadow(0 0 12px rgba(170, 0, 255, 1))
+        drop-shadow(0 0 28px rgba(170, 0, 255, 0.85))
+        drop-shadow(0 0 55px rgba(170, 0, 255, 0.65));
+      animation: neonPulse 0.80s ease-in-out infinite;
+    }
+
+    @keyframes neonPulse {
+      0% {
+        filter:
+          drop-shadow(0 0 4px rgba(255, 40, 40, 1))
+          drop-shadow(0 0 10px rgba(255, 40, 40, 0.85))
+          drop-shadow(0 0 12px rgba(170, 0, 255, 1))
+          drop-shadow(0 0 28px rgba(170, 0, 255, 0.85))
+          drop-shadow(0 0 55px rgba(170, 0, 255, 0.65));
+      }
+      50% {
+        filter:
+          drop-shadow(0 0 6px rgba(255, 40, 40, 1))
+          drop-shadow(0 0 14px rgba(255, 40, 40, 0.95))
+          drop-shadow(0 0 18px rgba(170, 0, 255, 1))
+          drop-shadow(0 0 40px rgba(170, 0, 255, 0.90))
+          drop-shadow(0 0 80px rgba(170, 0, 255, 0.75));
+      }
+      100% {
+        filter:
+          drop-shadow(0 0 4px rgba(255, 40, 40, 1))
+          drop-shadow(0 0 10px rgba(255, 40, 40, 0.85))
+          drop-shadow(0 0 12px rgba(170, 0, 255, 1))
+          drop-shadow(0 0 28px rgba(170, 0, 255, 0.85))
+          drop-shadow(0 0 55px rgba(170, 0, 255, 0.65));
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div class="panel">
+    <div style="margin-bottom:10px">
+      <input id="searchBox" type="text" placeholder="Αναζήτηση διεύθυνσης..." autocomplete="off" />
+      <div id="suggestions"></div>
+    </div>
+
+    <div class="row">
+      <button id="btnLocate">Εντοπισμός</button>
+      <button id="btnTrack" class="secondary">Συνεχής: OFF</button>
+      <button id="btnFit" class="secondary">Zoom σε όλα</button>
+
+      <button id="btnSkip" class="secondary">Δεν θέλω</button>
+      <button id="btnUndo" class="secondary" disabled>Πίσω</button>
+    </div>
+
+    <div style="margin-top:10px">
+      <div class="small">Κοντινότερο σημείο:</div>
+      <div id="closestInfo" class="mono">—</div>
+
+      <!-- ✅ ΝΕΟ: GPS status -->
+      <div id="gpsStatus" class="small" style="margin-top:6px; opacity:0.95;">
+        GPS: —
+      </div>
+
+      <div id="skipInfo" class="small" style="margin-top:6px; opacity:0.9;">Skipped: 0</div>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script src="app.js"></script>
+</body>
+</html>
