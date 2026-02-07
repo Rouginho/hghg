@@ -1,10 +1,4 @@
-// app.js
-
-// =========================
-// 1) ΣΗΜΕΙΑ / ΔΙΕΥΘΥΝΣΕΙΣ
-// =========================
-
-  const POINTS = [
+const POINTS = [
   {
     id: "p1",
     name: "Καστρίτσας 61 & Εθνικής Αντιστάσεως 84, Κηφισιά",
@@ -1107,392 +1101,497 @@
 
 
 ];
-
-  
-  
-
-
-
-
-
-// =====================================
-// 2) HELPERS: normalize (χωρίς τόνους)
-// =====================================
-function normalizeGreek(s) {
-  return (s || "")
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-function buildSearchIndex(points) {
-  return points.map(p => ({ ...p, _key: normalizeGreek(p.name) }));
-}
-
-function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
-  }[c]));
-}
+;
 
 // =========================
-// 3) Απόσταση (Haversine)
+// 2) ΧΑΡΤΗΣ / UI (fixed to match index.html ids)
 // =========================
-function haversineMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
 
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
+// ---- Map init ----
+const map = L.map("map", { zoomControl: false }).setView([38.02, 23.84], 11);
+L.control.zoom({ position: "bottomright" }).addTo(map);
 
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) ** 2;
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function formatDistance(m) {
-  if (m < 1000) return `${Math.round(m)} m`;
-  return `${(m / 1000).toFixed(2)} km`;
-}
-
-// =========================
-// ✅ GPS STATUS HELPERS (ΝΕΟ)
-// =========================
-function setGpsStatus(msg) {
-  const el = document.getElementById("gpsStatus");
-  if (el) el.textContent = "GPS: " + msg;
-}
-
-function explainGeoError(err) {
-  if (!err) return "Άγνωστο σφάλμα";
-
-  // err.code: 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
-  if (err.code === 1) {
-    return "Αρνήθηκες άδεια τοποθεσίας. Πάτα 🔒 στο URL → Location → Allow και refresh.";
-  }
-  if (err.code === 2) {
-    return "Δεν υπάρχει διαθέσιμη θέση. Άνοιξε GPS/Υψηλή ακρίβεια ή δοκίμασε από κινητό/έξω.";
-  }
-  if (err.code === 3) {
-    return "Timeout (άργησε το GPS). Δοκίμασε ξανά ή περίμενε λίγο.";
-  }
-  return err.message || "Άγνωστο σφάλμα";
-}
-
-// =========================
-// 4) MAP INIT (Leaflet)
-// =========================
-const map = L.map("map", { zoomControl: true }).setView([38.02, 23.82], 12);
-
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+// Tiles
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
 
+
+// ---- Icons / markers ----
 const markersById = new Map();
-const pointsLayer = L.featureGroup().addTo(map);
 
-// ✅ Safety: αν έχεις κανένα null/undefined lat/lng, μην σκάσει
-POINTS.forEach((p) => {
-  if (typeof p.lat !== "number" || typeof p.lng !== "number") return;
-
-  const m = L.marker([p.lat, p.lng], { title: p.name })
-    .addTo(pointsLayer)
-    .bindPopup(p.name);
-  markersById.set(p.id, m);
+// Pointer (pin) icons
+const normalIcon = L.icon({
+  iconUrl: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2228%22%20height%3D%2240%22%20viewBox%3D%220%200%2028%2040%22%3E%0A%3Cpath%20d%3D%22M14%200C6.268%200%200%206.268%200%2014c0%2010.5%2014%2026%2014%2026s14-15.5%2014-26C28%206.268%2021.732%200%2014%200z%22%20fill%3D%22%231e90ff%22%20stroke%3D%22white%22%20stroke-width%3D%222%22/%3E%0A%3Ccircle%20cx%3D%2214%22%20cy%3D%2214%22%20r%3D%225.5%22%20fill%3D%22white%22/%3E%0A%3C/svg%3E",
+  iconSize: [28, 40],
+  iconAnchor: [14, 40],
+  popupAnchor: [0, -36],
 });
 
-if (pointsLayer.getLayers().length) {
-  map.fitBounds(pointsLayer.getBounds().pad(0.2));
-}
+const closestIcon = L.icon({
+  iconUrl: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2228%22%20height%3D%2240%22%20viewBox%3D%220%200%2028%2040%22%3E%0A%3Cpath%20d%3D%22M14%200C6.268%200%200%206.268%200%2014c0%2010.5%2014%2026%2014%2026s14-15.5%2014-26C28%206.268%2021.732%200%2014%200z%22%20fill%3D%22%231e90ff%22%20stroke%3D%22white%22%20stroke-width%3D%222%22/%3E%0A%3Ccircle%20cx%3D%2214%22%20cy%3D%2214%22%20r%3D%225.5%22%20fill%3D%22white%22/%3E%0A%3C/svg%3E",
+  iconSize: [28, 40],
+  iconAnchor: [14, 40],
+  popupAnchor: [0, -36],
+});
 
-// =========================
-// 5) USER GPS + Closest logic + Skip/Undo
-// =========================
+const skippedIcon = L.icon({
+  iconUrl: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2228%22%20height%3D%2240%22%20viewBox%3D%220%200%2028%2040%22%3E%0A%3Cpath%20d%3D%22M14%200C6.268%200%200%206.268%200%2014c0%2010.5%2014%2026%2014%2026s14-15.5%2014-26C28%206.268%2021.732%200%2014%200z%22%20fill%3D%22rgba%28255%2C255%2C255%2C0.35%29%22%20stroke%3D%22rgba%28255%2C255%2C255%2C0.7%29%22%20stroke-width%3D%222%22/%3E%0A%3Ccircle%20cx%3D%2214%22%20cy%3D%2214%22%20r%3D%225.5%22%20fill%3D%22rgba%28255%2C255%2C255%2C0.7%29%22/%3E%0A%3C/svg%3E",
+  iconSize: [28, 40],
+  iconAnchor: [14, 40],
+  popupAnchor: [0, -36],
+});
+
+
+// ---- UI refs (MATCH index.html) ----
+const closestInfoEl = document.getElementById("closestInfo");
+const gpsStatusEl = document.getElementById("gpsStatus");
+const skipInfoEl = document.getElementById("skipInfo");
+
+const searchBox = document.getElementById("searchBox");
+const suggestionsEl = document.getElementById("suggestions");
+
+const btnLocate = document.getElementById("btnLocate");
+const btnTrack = document.getElementById("btnTrack");
+const btnFit = document.getElementById("btnFit");
+const btnNav = document.getElementById("btnNav");
+const btnSkip = document.getElementById("btnSkip");
+const btnUndo = document.getElementById("btnUndo");
+
+// ---- State ----
 let userMarker = null;
 let watchId = null;
 let closestId = null;
 
 // Skip state
-let lastPos = null;           // {lat, lng}
+let lastPos = null; // {lat, lng}
 const skippedSet = new Set(); // ids που έγιναν "Δεν θέλω"
-const skipHistory = [];       // stack για undo
+const skipHistory = []; // stack για undo
 
+function updateSkipInfo() {
+  if (skipInfoEl) skipInfoEl.textContent = `Skipped: ${skippedSet.size}`;
+  if (btnUndo) btnUndo.disabled = skipHistory.length === 0;
+}
+
+function setGpsStatus(msg) {
+  if (gpsStatusEl) gpsStatusEl.textContent = `GPS: ${msg}`;
+  else console.log("[GPS]", msg);
+}
+
+// ---- Map interaction flag ----
+map._userInteracted = false;
+map.on("dragstart zoomstart", () => {
+  map._userInteracted = true;
+});
+
+// =========================
+// 2.1) Validations (fix για lat/lng null)
+// =========================
+function isValidCoord(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+// =========================
+// 2.2) Markers
+// =========================
+function makeMarker(p) {
+  if (!isValidCoord(p.lat) || !isValidCoord(p.lng)) {
+    console.warn("Σημείο με άκυρα lat/lng (αγνοείται):", p.id, p.name, p.lat, p.lng);
+    return;
+  }
+
+  const m = L.marker([p.lat, p.lng], { icon: normalIcon });
+
+  const latTxt = p.lat.toFixed(6);
+  const lngTxt = p.lng.toFixed(6);
+
+  m.bindPopup(
+    `<b>${escapeHtml(p.name)}</b><br><span class="small">${latTxt}, ${lngTxt}</span>`
+  );
+
+  m.addTo(map);
+  markersById.set(p.id, m);
+}
+
+// Render all point markers
+POINTS.forEach(makeMarker);
+
+// =========================
+// Navigation helpers (Google Maps)
+// =========================
+function getPointById(id) {
+  return POINTS.find((p) => p.id === id) || null;
+}
+
+function openNavigationTo(lat, lng) {
+  const dest = `${lat},${lng}`;
+  const origin = lastPos ? `${lastPos.lat},${lastPos.lng}` : null;
+
+  let url =
+    `https://www.google.com/maps/dir/?api=1` +
+    `&destination=${encodeURIComponent(dest)}` +
+    `&travelmode=driving`;
+
+  if (origin) url += `&origin=${encodeURIComponent(origin)}`;
+
+  location.href = url;
+}
+
+// =========================
+// 3) ΛΟΓΙΚΗ ΚΟΝΤΙΝΟΤΕΡΟΥ
+// =========================
 function setUserPosition(lat, lng, accuracy) {
   lastPos = { lat, lng };
 
-  const textAcc = accuracy ? ` ±${Math.round(accuracy)}m` : "";
   if (!userMarker) {
     userMarker = L.circleMarker([lat, lng], {
-      radius: 9,
+      radius: 8,
       weight: 2,
-      fillOpacity: 0.7,
+      fillOpacity: 0.6,
     }).addTo(map);
-    userMarker.bindPopup("Εσύ είσαι εδώ" + textAcc);
-  } else {
-    userMarker.setLatLng([lat, lng]);
-    userMarker.setPopupContent("Εσύ είσαι εδώ" + textAcc);
+  }
+  userMarker.setLatLng([lat, lng]);
+
+  const accTxt = Number.isFinite(accuracy) ? `±${Math.round(accuracy)}m` : "—";
+  setGpsStatus(`OK ${accTxt}`);
+
+  const { id, distMeters } = findClosest(lat, lng);
+  setClosest(id, distMeters);
+
+  if (!map._userInteracted) {
+    map.setView([lat, lng], Math.max(map.getZoom(), 14));
   }
 }
 
-// Βάζουμε/βγάζουμε class πάνω στο <img> του marker
-function setMarkerGlow(marker, enable) {
-  const el = marker.getElement && marker.getElement(); // <img>
-  if (!el) return;
-  if (enable) el.classList.add("closest-glow");
-  else el.classList.remove("closest-glow");
+function clearClosestGlow(marker) {
+  const el = marker && marker.getElement && marker.getElement();
+  if (el) el.classList.remove("closest-glow");
 }
 
-function setSkipUI() {
-  const el = document.getElementById("skipInfo");
-  if (el) el.textContent = `Skipped: ${skippedSet.size}`;
-
-  const undoBtn = document.getElementById("btnUndo");
-  if (undoBtn) undoBtn.disabled = skipHistory.length === 0;
+function applyClosestGlow(marker) {
+  const el = marker && marker.getElement && marker.getElement();
+  if (el) el.classList.add("closest-glow");
 }
 
-function getClosestAvailable(lat, lng) {
-  let best = null;
+function setClosest(id, distMeters) {
+  if (closestId && markersById.has(closestId)) {
+    const oldM = markersById.get(closestId);
+    clearClosestGlow(oldM);
+    if (skippedSet.has(closestId)) oldM.setIcon(skippedIcon);
+    else oldM.setIcon(normalIcon);
+  }
+
+  closestId = id;
+
+  if (id && markersById.has(id)) {
+    const m = markersById.get(id);
+
+    if (skippedSet.has(id)) {
+      m.setIcon(skippedIcon);
+      clearClosestGlow(m);
+    } else {
+      m.setIcon(closestIcon);
+      applyClosestGlow(m);
+    }
+
+    const p = getPointById(id);
+    const km = Number.isFinite(distMeters) ? (distMeters / 1000).toFixed(2) : "—";
+    if (closestInfoEl) closestInfoEl.textContent = p ? `${p.name}  •  ${km} km` : "—";
+  } else {
+    if (closestInfoEl) closestInfoEl.textContent = "—";
+  }
+}
+
+function findClosest(lat, lng) {
+  let bestId = null;
+  let bestD = Infinity;
+
   for (const p of POINTS) {
     if (skippedSet.has(p.id)) continue;
-    if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+    if (!isValidCoord(p.lat) || !isValidCoord(p.lng)) continue;
 
     const d = haversineMeters(lat, lng, p.lat, p.lng);
-    if (!best || d < best.distance) best = { ...p, distance: d };
+    if (d < bestD) {
+      bestD = d;
+      bestId = p.id;
+    }
   }
-  return best;
+
+  return { id: bestId, distMeters: bestD };
 }
 
-function updateClosest(lat, lng) {
-  if (!POINTS.length) return;
-
-  const best = getClosestAvailable(lat, lng);
-  const info = document.getElementById("closestInfo");
-
-  if (!best) {
-    info.textContent = "Δεν υπάρχουν άλλα διαθέσιμα σημεία (ή δεν έχουν lat/lng).";
-
-    if (closestId) {
-      const prev = markersById.get(closestId);
-      if (prev) setMarkerGlow(prev, false);
-    }
-    closestId = null;
-    setSkipUI();
-    return;
-  }
-
-  info.textContent = `${best.name} — ${formatDistance(best.distance)}`;
-
-  if (best.id !== closestId) {
-    // σβήσε glow από προηγούμενο
-    if (closestId) {
-      const prev = markersById.get(closestId);
-      if (prev) setMarkerGlow(prev, false);
-    }
-
-    closestId = best.id;
-
-    const m = markersById.get(best.id);
-    if (m) {
-      setTimeout(() => setMarkerGlow(m, true), 0);
-      m.openPopup();
-    }
-  }
-
-  setSkipUI();
+function updateClosestFromLastPos() {
+  if (!lastPos) return;
+  const { id, distMeters } = findClosest(lastPos.lat, lastPos.lng);
+  setClosest(id, distMeters);
 }
 
+// =========================
+// 4) GEOLOCATION
+// =========================
 function locateOnce() {
   if (!navigator.geolocation) {
-    alert("Το GPS/Geolocation δεν υποστηρίζεται από τον browser σου.");
-    setGpsStatus("Ο browser δεν υποστηρίζει geolocation.");
+    setGpsStatus("Δεν υποστηρίζεται");
     return;
   }
 
-  setGpsStatus("Ψάχνω σήμα GPS… (δώσε άδεια Location)");
-
+  setGpsStatus("Εντοπίζω...");
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const { latitude, longitude, accuracy } = pos.coords;
-
-      setGpsStatus(`OK ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`);
-
       setUserPosition(latitude, longitude, accuracy);
-      map.setView([latitude, longitude], 15);
-      updateClosest(latitude, longitude);
+    
+      // Πάντα ζουμ στη θέση μου όταν πατάω Εντοπισμός
+      map.setView([latitude, longitude], Math.max(map.getZoom(), 16));
     },
     (err) => {
-      const msg = explainGeoError(err);
-      setGpsStatus(`${msg} (code ${err.code})`);
-      alert("Δεν έγινε εντοπισμός: " + msg);
+      setGpsStatus("Σφάλμα: " + err.message);
     },
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    }
   );
 }
 
-function toggleTracking() {
-  const btn = document.getElementById("btnTrack");
-
-  if (watchId != null) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-    btn.textContent = "Συνεχής: OFF";
-    setGpsStatus("Tracking OFF");
-    return;
-  }
-
+function startWatch() {
   if (!navigator.geolocation) {
-    alert("Το GPS/Geolocation δεν υποστηρίζεται από τον browser σου.");
-    setGpsStatus("Ο browser δεν υποστηρίζει geolocation.");
+    setGpsStatus("Δεν υποστηρίζεται");
     return;
   }
 
-  setGpsStatus("Tracking ON…");
+  setGpsStatus("Παρακολούθηση ON...");
+  if (btnTrack) btnTrack.textContent = "Συνεχής: ON";
 
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
       const { latitude, longitude, accuracy } = pos.coords;
-
-      setGpsStatus(`OK ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`);
-
       setUserPosition(latitude, longitude, accuracy);
-      updateClosest(latitude, longitude);
     },
     (err) => {
-      const msg = explainGeoError(err);
-      setGpsStatus(`Tracking error: ${msg} (code ${err.code})`);
-      alert("Tracking error: " + msg);
+      setGpsStatus("Σφάλμα: " + err.message);
     },
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 2000 }
+    {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 2000,
+    }
   );
-
-  btn.textContent = "Συνεχής: ON";
 }
 
-// Buttons
-document.getElementById("btnLocate").addEventListener("click", locateOnce);
-document.getElementById("btnTrack").addEventListener("click", toggleTracking);
-document.getElementById("btnFit").addEventListener("click", () => {
-  const groups = [pointsLayer];
-  if (userMarker) groups.push(L.featureGroup([userMarker]));
-  const fg = L.featureGroup(groups);
-  map.fitBounds(fg.getBounds().pad(0.2));
-});
-
-// Skip / Undo
-document.getElementById("btnSkip").addEventListener("click", () => {
-  if (!closestId) return;
-
-  skippedSet.add(closestId);
-  skipHistory.push(closestId);
-
-  // βγάλε glow από αυτό που μόλις "έκανες δεν θέλω"
-  const cur = markersById.get(closestId);
-  if (cur) setMarkerGlow(cur, false);
-
-  if (lastPos) updateClosest(lastPos.lat, lastPos.lng);
-  else setSkipUI();
-});
-
-document.getElementById("btnUndo").addEventListener("click", () => {
-  if (skipHistory.length === 0) return;
-
-  const id = skipHistory.pop();
-  skippedSet.delete(id);
-
-  if (lastPos) updateClosest(lastPos.lat, lastPos.lng);
-  setSkipUI();
-});
-
-// αρχικό UI state
-setSkipUI();
-setGpsStatus("—");
+function stopWatch() {
+  navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  if (btnTrack) btnTrack.textContent = "Συνεχής: OFF";
+  setGpsStatus("OFF");
+}
 
 // =========================
-// 6) SEARCH + AUTOCOMPLETE
+// 5) BUTTONS
 // =========================
-const searchBox = document.getElementById("searchBox");
-const suggestionsEl = document.getElementById("suggestions");
-let SEARCH_INDEX = buildSearchIndex(POINTS);
+if (btnLocate) btnLocate.addEventListener("click", () => locateOnce());
 
-function getMatches(query, limit = 8) {
-  const q = normalizeGreek(query);
+if (btnTrack) {
+  btnTrack.addEventListener("click", () => {
+    if (watchId) stopWatch();
+    else startWatch();
+  });
+}
+
+if (btnFit) btnFit.addEventListener("click", () => fitAll());
+
+if (btnNav) {
+  btnNav.addEventListener("click", () => {
+    if (!closestId) {
+      alert("Δεν έχω κοντινότερο σημείο ακόμη. Πάτα πρώτα Εντοπισμός.");
+      return;
+    }
+    const p = getPointById(closestId);
+    if (!p || !isValidCoord(p.lat) || !isValidCoord(p.lng)) {
+      alert("Το κοντινότερο σημείο δεν έχει σωστό lat/lng.");
+      return;
+    }
+    openNavigationTo(p.lat, p.lng);
+  });
+}
+
+if (btnSkip) {
+  btnSkip.addEventListener("click", () => {
+    if (!closestId) return;
+
+    skippedSet.add(closestId);
+    skipHistory.push(closestId);
+
+    const cur = markersById.get(closestId);
+    if (cur) {
+      clearClosestGlow(cur);
+      cur.setIcon(skippedIcon);
+    }
+
+    updateSkipInfo();
+    updateClosestFromLastPos();
+  });
+}
+
+if (btnUndo) {
+  btnUndo.addEventListener("click", () => {
+    const last = skipHistory.pop();
+    if (!last) return;
+
+    skippedSet.delete(last);
+    const m = markersById.get(last);
+    if (m) {
+      clearClosestGlow(m);
+      m.setIcon(normalIcon);
+    }
+
+    updateSkipInfo();
+    updateClosestFromLastPos();
+  });
+}
+
+// =========================
+// 6) SEARCH / SUGGESTIONS
+// =========================
+let suggestions = [];
+
+function buildSuggestions(query) {
+  const q = (query || "").trim().toLowerCase();
   if (!q) return [];
+  return POINTS
+    .filter((p) => p && typeof p.name === "string" && p.name.toLowerCase().includes(q))
+    .slice(0, 12);
+}
 
-  let results = SEARCH_INDEX.filter(p => p._key.startsWith(q));
-  if (results.length < limit) {
-    const setIds = new Set(results.map(r => r.id));
-    const more = SEARCH_INDEX.filter(p => !setIds.has(p.id) && p._key.includes(q));
-    results = results.concat(more);
+function renderSuggestions(items) {
+  if (!suggestionsEl) return;
+
+  suggestionsEl.innerHTML = "";
+  if (!items.length) {
+    suggestionsEl.style.display = "none";
+    return;
   }
-  return results.slice(0, limit);
+
+  const frag = document.createDocumentFragment();
+  items.forEach((p) => {
+    const div = document.createElement("div");
+    div.className = "sugg-item";
+    div.textContent = p.name;
+    div.addEventListener("click", () => chooseSuggestion(p));
+    frag.appendChild(div);
+  });
+
+  suggestionsEl.appendChild(frag);
+  suggestionsEl.style.display = "block";
 }
 
 function hideSuggestions() {
+  if (!suggestionsEl) return;
   suggestionsEl.style.display = "none";
   suggestionsEl.innerHTML = "";
 }
 
-function showSuggestions(items) {
-  if (!items.length) return hideSuggestions();
-  suggestionsEl.style.display = "block";
-  suggestionsEl.innerHTML = items.map((p, idx) => `
-    <div class="sugg-item" data-id="${p.id}" style="${idx === 0 ? "border-top:0;" : ""}">
-      <span class="sugg-strong">${escapeHtml(p.name)}</span>
-    </div>
-  `).join("");
-}
+function chooseSuggestion(p) {
+  if (!p) return;
 
-function goToPointById(id) {
-  const p = POINTS.find(x => x.id === id);
-  const m = markersById.get(id);
-  if (!p || !m) return;
+  if (isValidCoord(p.lat) && isValidCoord(p.lng)) {
+    map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
+    const m = markersById.get(p.id);
+    if (m) m.openPopup();
+  } else {
+    alert("Αυτό το σημείο δεν έχει σωστό lat/lng.");
+  }
 
-  map.setView([p.lat, p.lng], 17, { animate: true });
-  m.openPopup();
-
-  searchBox.value = p.name;
+  if (searchBox) searchBox.value = p.name;
   hideSuggestions();
 }
 
-searchBox.addEventListener("input", () => {
-  showSuggestions(getMatches(searchBox.value, 10));
-});
+if (searchBox) {
+  searchBox.addEventListener("input", (e) => {
+    suggestions = buildSuggestions(e.target.value);
+    renderSuggestions(suggestions);
+  });
 
-searchBox.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    hideSuggestions();
-    searchBox.blur();
-    return;
-  }
-  if (e.key === "Enter") {
-    const matches = getMatches(searchBox.value, 1);
-    if (matches.length) goToPointById(matches[0].id);
-  }
-});
+  searchBox.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideSuggestions();
+  });
+}
 
-suggestionsEl.addEventListener("click", (e) => {
-  const item = e.target.closest(".sugg-item");
-  if (!item) return;
-  goToPointById(item.getAttribute("data-id"));
-});
-
+// click outside closes suggestions
 document.addEventListener("click", (e) => {
-  const isInside = e.target.closest("#suggestions") || e.target.closest("#searchBox");
-  if (!isInside) hideSuggestions();
+  const inside = e.target.closest("#searchBox") || e.target.closest("#suggestions");
+  if (!inside) hideSuggestions();
 });
 
 // =========================
-// 7) PWA: Service Worker
+// Fit all
 // =========================
+function fitAll() {
+  const latlngs = [];
+
+  if (userMarker) latlngs.push(userMarker.getLatLng());
+
+  for (const p of POINTS) {
+    if (!p) continue;
+    if (skippedSet.has(p.id)) continue;
+    if (!isValidCoord(p.lat) || !isValidCoord(p.lng)) continue;
+    latlngs.push([p.lat, p.lng]);
+  }
+
+  if (!latlngs.length) return;
+  const bounds = L.latLngBounds(latlngs);
+  map.fitBounds(bounds.pad(0.2));
+}
+
+// =========================
+// Utils
+// =========================
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (x) => (x * Math.PI) / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (m) => {
+    return (
+      {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[m] || m
+    );
+  });
+}
+
+// =========================
+// START + PWA SW
+// =========================
+updateSkipInfo();
+setGpsStatus("—");
+if (closestInfoEl) closestInfoEl.textContent = "—";
+fitAll();
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").catch((err) => {
+      console.warn("SW register failed:", err);
+    });
   });
 }
